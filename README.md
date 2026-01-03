@@ -3,7 +3,7 @@ Fork of CLSTR to use with Reject-Rule Control
 
 # lsfr
 
-_Build complex systems from scratch._
+_Build distributed systems from scratch._
 
 Progressive challenges to learn distributed systems and other complex systems by implementing them yourself.
 
