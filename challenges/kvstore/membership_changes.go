@@ -1,7 +1,7 @@
 package kvstore
 
 import (
-	. "github.com/clstr-io/clstr/internal/attest"
+	. "github.com/OferMania/clstr-rc/internal/attest"
 )
 
 func MembershipChanges() *Suite {

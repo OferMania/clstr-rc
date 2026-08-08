@@ -7,7 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/clstr-io/clstr/internal/cli"
+	"github.com/OferMania/clstr-rc/internal/cli"
 	commands "github.com/urfave/cli/v3"
 )
 

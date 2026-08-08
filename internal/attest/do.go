@@ -8,7 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/clstr-io/clstr/pkg/threadsafe"
+	"github.com/OferMania/clstr-rc/pkg/threadsafe"
 )
 
 // Do provides the test harness and acts as the test runner.

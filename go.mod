@@ -1,4 +1,4 @@
-module github.com/clstr-io/clstr
+module github.com/OferMania/clstr-rc
 
 go 1.26
 

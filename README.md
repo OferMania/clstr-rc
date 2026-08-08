@@ -1,5 +1,12 @@
 # clstr-rc
-Fork of CLSTR to use with Reject-Rule Control
+
+This is a modified version of CLSTR for RamCourt usage.
+
+To build, do:
+
+```console
+$ go build -o clstr ./cmd/clstr
+```
 
 # `clstr` CLI
 
