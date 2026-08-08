@@ -1,0 +1,353 @@
+package cli
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+
+	_ "github.com/clstr-io/clstr/challenges"
+	"github.com/clstr-io/clstr/images"
+	"github.com/clstr-io/clstr/internal/attest"
+	"github.com/clstr-io/clstr/internal/registry"
+	"github.com/clstr-io/clstr/internal/state"
+	"github.com/fatih/color"
+	commands "github.com/urfave/cli/v3"
+)
+
+const (
+	DocsBaseURL = "https://clstr.io"
+)
+
+var (
+	yellow = color.New(color.FgYellow).SprintFunc()
+)
+
+// createChallengeFiles creates the initial project files for a new challenge.
+func createChallengeFiles(challenge *registry.Challenge, targetPath, lang string) error {
+	// README.md
+	readmePath := filepath.Join(targetPath, "README.md")
+	err := os.WriteFile(readmePath, []byte(challenge.README()), 0644)
+	if err != nil {
+		return fmt.Errorf("Failed to create README.md: %w", err)
+	}
+
+	// clstr.yaml
+	cfg := &state.State{
+		Challenge: challenge.Key,
+		Stage:     challenge.StageOrder[0],
+	}
+	statePath := filepath.Join(targetPath, "clstr.yaml")
+	err = state.SaveTo(cfg, statePath)
+	if err != nil {
+		return fmt.Errorf("Failed to create clstr.yaml: %w", err)
+	}
+
+	// Dockerfile
+	dockerfile, err := images.Dockerfile(lang)
+	if err != nil {
+		return fmt.Errorf("Failed to load Dockerfile template: %w", err)
+	}
+
+	dockerfilePath := filepath.Join(targetPath, "Dockerfile")
+	err = os.WriteFile(dockerfilePath, dockerfile, 0644)
+	if err != nil {
+		return fmt.Errorf("Failed to create Dockerfile: %w", err)
+	}
+
+	return nil
+}
+
+// InitChallenge initializes a challenge in the specified directory.
+func InitChallenge(ctx context.Context, cmd *commands.Command) error {
+	// Get Challenge
+	args := cmd.Args().Slice()
+	if len(args) == 0 {
+		return fmt.Errorf("Challenge name is required.\nUsage: %s", yellow("clstr init <challenge> [path]"))
+	}
+
+	challengeKey := args[0]
+	challenge, err := registry.GetChallenge(challengeKey)
+	if err != nil {
+		return err
+	}
+
+	// Create Directory
+	var targetPath string
+	if len(args) > 1 {
+		targetPath = args[1]
+		err := os.MkdirAll(targetPath, 0755)
+		if err != nil {
+			return fmt.Errorf("Failed to create directory %s: %w", targetPath, err)
+		}
+	} else {
+		targetPath = "."
+	}
+
+	lang := cmd.String("language")
+	err = createChallengeFiles(challenge, targetPath, lang)
+	if err != nil {
+		return err
+	}
+
+	if targetPath == "." {
+		fmt.Println("Created challenge in current directory.")
+	} else {
+		fmt.Printf("Created challenge in directory: ./%s\n", targetPath)
+	}
+
+	fmt.Println("  Dockerfile      - Build and run your server in a container")
+	fmt.Println("  README.md      - Challenge overview and requirements")
+	fmt.Println("  clstr.yaml     - Tracks your progress")
+	fmt.Println()
+
+	firstStageKey := challenge.StageOrder[0]
+	if targetPath == "." {
+		fmt.Printf("Implement %s stage, then run %s.\n", firstStageKey, yellow("clstr test"))
+	} else {
+		fmt.Printf("cd %s and implement %s stage, then run %s.\n", targetPath, firstStageKey, yellow("clstr test"))
+	}
+
+	return nil
+}
+
+// validateEnvironment loads the challenge state from the current directory.
+func validateEnvironment() (*state.State, error) {
+	cfg, err := state.Load()
+	if err != nil {
+		return nil, err
+	}
+
+	return cfg, nil
+}
+
+// runStageTests runs tests for a specific stage and returns success/failure.
+func runStageTests(ctx context.Context, challengeKey, stageKey string) (bool, error) {
+	challenge, err := registry.GetChallenge(challengeKey)
+	if err != nil {
+		return false, err
+	}
+
+	stage, err := challenge.GetStage(stageKey)
+	if err != nil {
+		msg := "\nAvailable stages:\n"
+		for _, stage := range challenge.StageOrder {
+			msg += fmt.Sprintf("- %s\n", stage)
+		}
+
+		return false, fmt.Errorf("%w\n%s", err, msg)
+	}
+
+	suite := stage.Fn().With(attest.WithChallenge(challengeKey))
+	fmt.Printf("Testing %s: %s\n\n", stageKey, stage.Name)
+	passed := suite.Run(ctx)
+	return passed, nil
+}
+
+// Test runs tests for the specified stage(s).
+func Test(ctx context.Context, cmd *commands.Command) error {
+	cfg, err := validateEnvironment()
+	if err != nil {
+		return err
+	}
+
+	var challengeKey string
+	var stageKey string
+
+	switch cmd.NArg() {
+	case 0:
+		challengeKey = cfg.Challenge
+		stageKey = cfg.Stage
+	case 1:
+		challengeKey = cfg.Challenge
+		stageKey = cmd.Args().Slice()[0]
+	default:
+		return fmt.Errorf("Too many arguments.\nUsage: %s", yellow("clstr test [stage]"))
+	}
+
+	challenge, err := registry.GetChallenge(challengeKey)
+	if err != nil {
+		return err
+	}
+
+	// Determine which stages to test
+	var stagesToTest []string
+	if cmd.Bool("so-far") {
+		targetIndex := challenge.StageIndex(stageKey)
+		if targetIndex == -1 {
+			return fmt.Errorf("Stage '%s' not found in challenge", stageKey)
+		}
+
+		stagesToTest = challenge.StageOrder[:targetIndex+1]
+	} else {
+		stagesToTest = []string{stageKey}
+	}
+
+	// Run tests for all stages
+	for _, currentStage := range stagesToTest {
+		passed, err := runStageTests(ctx, challengeKey, currentStage)
+		if err != nil {
+			return err
+		}
+
+		if !passed {
+			guideURL := fmt.Sprintf("%s/%s/%s", DocsBaseURL, challengeKey, currentStage)
+			return fmt.Errorf("\nRead the guide: \033]8;;%s\033\\%s/%s/%s\033]8;;\033\\\n", guideURL, DocsBaseURL, challengeKey, currentStage)
+		}
+
+		if len(stagesToTest) > 1 {
+			fmt.Println()
+		}
+	}
+
+	// Success message
+	if len(stagesToTest) > 1 {
+		fmt.Printf("All stages up to %s passed! ✓\n", stageKey)
+	}
+
+	targetIndex := challenge.StageIndex(stageKey)
+	if targetIndex < challenge.Len()-1 {
+		fmt.Printf("\nRun %s to advance to the next stage.\n", yellow("clstr next"))
+	}
+
+	return nil
+}
+
+// ShowLogs prints the captured logs for the given nodes, interleaved by timestamp.
+// With no arguments, shows all nodes.
+func ShowLogs(ctx context.Context, cmd *commands.Command) error {
+	cfg, err := validateEnvironment()
+	if err != nil {
+		return err
+	}
+
+	nodeNames := cmd.Args().Slice()
+	if len(nodeNames) == 0 {
+		nodeNames, err = attest.NodesWithLogs(cfg.Challenge)
+		if err != nil {
+			return fmt.Errorf("Failed to list nodes: %w", err)
+		}
+
+		if len(nodeNames) == 0 {
+			return fmt.Errorf("No logs found. Run %s first.", yellow("clstr test"))
+		}
+	}
+
+	return attest.RenderLogs(cfg.Challenge, nodeNames)
+}
+
+// NextStage advances to the next stage after verifying current stage is complete.
+func NextStage(ctx context.Context, cmd *commands.Command) error {
+	// Get Challenge
+	cfg, err := validateEnvironment()
+	if err != nil {
+		return err
+	}
+
+	challenge, err := registry.GetChallenge(cfg.Challenge)
+	if err != nil {
+		return err
+	}
+
+	// Check if current stage is completed
+	currentIndex := challenge.StageIndex(cfg.Stage)
+	if currentIndex == -1 {
+		return fmt.Errorf("Current stage '%s' not found in challenge", cfg.Stage)
+	}
+
+	// Run tests for current stage
+	passed, err := runStageTests(ctx, cfg.Challenge, cfg.Stage)
+	if err != nil {
+		return err
+	}
+
+	fmt.Println()
+
+	if !passed {
+		return fmt.Errorf("Complete %s before advancing.", cfg.Stage)
+	}
+
+	// Check if already at final stage
+	if currentIndex == challenge.Len()-1 {
+		fmt.Printf("You've completed all stages for %s! 🎉\n\n", cfg.Challenge)
+		fmt.Printf("Try another challenge at \033]8;;%s/\033\\%s\033]8;;\033\\\n", DocsBaseURL, DocsBaseURL)
+
+		return state.Save(cfg)
+	}
+
+	// Advance to next stage
+	nextStageKey := challenge.StageOrder[currentIndex+1]
+	cfg.Stage = nextStageKey
+	err = state.Save(cfg)
+	if err != nil {
+		return err
+	}
+
+	nextStage, err := challenge.GetStage(nextStageKey)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("Advanced to %s: %s\n\n", nextStageKey, nextStage.Name)
+	guideURL := fmt.Sprintf("%s/%s/%s", DocsBaseURL, cfg.Challenge, nextStageKey)
+	fmt.Printf("Read the guide: \033]8;;%s\033\\%s/%s/%s\033]8;;\033\\\n\n", guideURL, DocsBaseURL, cfg.Challenge, nextStageKey)
+	fmt.Printf("Run %s when ready.\n", yellow("clstr test"))
+
+	return nil
+}
+
+// ShowStatus displays the current challenge progress and next steps.
+func ShowStatus(ctx context.Context, cmd *commands.Command) error {
+	// Summary
+	cfg, err := state.Load()
+	if err != nil {
+		return err
+	}
+
+	challenge, err := registry.GetChallenge(cfg.Challenge)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("%s\n\n%s\n\n", challenge.Name, challenge.Summary)
+
+	// Progress
+	fmt.Println("Progress:")
+	currentIndex := challenge.StageIndex(cfg.Stage)
+	for i, stageKey := range challenge.StageOrder {
+		stage, err := challenge.GetStage(stageKey)
+		if err != nil {
+			continue
+		}
+
+		isCompleted := i < currentIndex
+		if isCompleted {
+			fmt.Printf("✓ %-18s - %s\n", stageKey, stage.Name)
+		} else if stageKey == cfg.Stage {
+			fmt.Printf("→ %-18s - %s\n", stageKey, stage.Name)
+		} else {
+			fmt.Printf("  %-18s - %s\n", stageKey, stage.Name)
+		}
+	}
+
+	// Next steps
+	guideURL := fmt.Sprintf("%s/%s/%s", DocsBaseURL, cfg.Challenge, cfg.Stage)
+	fmt.Printf("\nRead the guide: \033]8;;%s\033\\%s/%s/%s\033]8;;\033\\\n\n", guideURL, DocsBaseURL, cfg.Challenge, cfg.Stage)
+	fmt.Printf("Implement %s, then run %s.\n", cfg.Stage, yellow("clstr test"))
+
+	return nil
+}
+
+// ListChallenges displays all available challenges.
+func ListChallenges(ctx context.Context, cmd *commands.Command) error {
+	fmt.Printf("Available challenges:\n\n")
+
+	challenges := registry.GetAllChallenges()
+	for key, challenge := range challenges {
+		fmt.Printf("  %-20s - %s (%d stages)\n", key, challenge.Name, challenge.Len())
+	}
+
+	fmt.Printf("\nStart with: %s\n", yellow("clstr init <challenge> --language <lang>"))
+
+	return nil
+}
