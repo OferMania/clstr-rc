@@ -98,6 +98,9 @@ type Check struct {
 	headerMatchers []headerMatcher
 	bodyMatchers   []Matcher[string]
 	jsonMatchers   []Matcher[string]
+
+	captureStatus *int
+	captureDest   interface{}
 }
 
 // headerMatcher pairs a header name with matchers for its value.
@@ -153,6 +156,20 @@ func (c *Check) Header(name string, matchers ...Matcher[string]) *Check {
 // Hint sets the help text shown when the assertion fails.
 func (c *Check) Hint(help string) *Check {
 	c.hint = help
+	return c
+}
+
+// Capture unmarshals the response body into dest once the request completes.
+// Call before Run().
+func (c *Check) Capture(dest interface{}) *Check {
+	c.captureDest = dest
+	return c
+}
+
+func (c *Check) CaptureStatus(dest *int) *Check {
+	if dest != nil {
+		c.captureStatus = dest
+	}
 	return c
 }
 
@@ -243,6 +260,14 @@ func (c *Check) executeOne(url string, r *result) (bool, error) {
 	r.status = resp.StatusCode
 	r.headers = resp.Header
 	r.body = string(responseBody)
+
+	if c.captureDest != nil {
+		_ = json.Unmarshal(responseBody, c.captureDest)
+	}
+
+	if c.captureStatus != nil {
+		*c.captureStatus = r.status
+	}
 
 	if !checkAll(r.status, c.statusMatchers, func(m Matcher[int], actual int) {
 		r.failure = fmt.Sprintf("Expected status %s, got %d %s", m.Expected(), actual, http.StatusText(actual))

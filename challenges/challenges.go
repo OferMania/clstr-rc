@@ -1,5 +1,5 @@
 package challenges
 
 import (
-	_ "github.com/clstr-io/clstr/challenges/kvstore"
+	_ "github.com/OferMania/clstr-rc/challenges/kvstore"
 )

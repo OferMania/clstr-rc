@@ -6,11 +6,11 @@ import (
 	"os"
 	"path/filepath"
 
-	_ "github.com/clstr-io/clstr/challenges"
-	"github.com/clstr-io/clstr/images"
-	"github.com/clstr-io/clstr/internal/attest"
-	"github.com/clstr-io/clstr/internal/registry"
-	"github.com/clstr-io/clstr/internal/state"
+	_ "github.com/OferMania/clstr-rc/challenges"
+	"github.com/OferMania/clstr-rc/images"
+	"github.com/OferMania/clstr-rc/internal/attest"
+	"github.com/OferMania/clstr-rc/internal/registry"
+	"github.com/OferMania/clstr-rc/internal/state"
 	"github.com/fatih/color"
 	commands "github.com/urfave/cli/v3"
 )

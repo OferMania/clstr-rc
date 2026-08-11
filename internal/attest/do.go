@@ -2,13 +2,14 @@ package attest
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"sort"
 	"sync"
 	"sync/atomic"
 
-	"github.com/clstr-io/clstr/pkg/threadsafe"
+	"github.com/OferMania/clstr-rc/pkg/threadsafe"
 )
 
 // Do provides the test harness and acts as the test runner.
@@ -258,4 +259,14 @@ func (do *Do) DELETE(sel NodeSelector, path string, args ...any) *Check {
 // PATCH creates a Check for an HTTP PATCH request.
 func (do *Do) PATCH(sel NodeSelector, path string, args ...any) *Check {
 	return do.http(sel, "PATCH", path, args...)
+}
+
+func (do *Do) PutJSON(sel NodeSelector, path string, payload interface{}) *Check {
+	data, _ := json.Marshal(payload)
+	return do.PUT(sel, path, string(data), H{"Content-Type": "application/json"})
+}
+
+func (do *Do) DeleteJSON(sel NodeSelector, path string, payload interface{}) *Check {
+	data, _ := json.Marshal(payload)
+	return do.DELETE(sel, path, string(data), H{"Content-Type": "application/json"})
 }

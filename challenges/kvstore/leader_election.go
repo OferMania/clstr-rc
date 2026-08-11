@@ -5,7 +5,7 @@ import (
 	"syscall"
 	"time"
 
-	. "github.com/clstr-io/clstr/internal/attest"
+	. "github.com/OferMania/clstr-rc/internal/attest"
 )
 
 // electionTimeout is the upper bound of the randomized election timeout.
