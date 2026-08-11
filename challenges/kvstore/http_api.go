@@ -104,11 +104,10 @@ func HTTPAPI() *Suite {
 				"uganda":   "Kampala",
 				"tanzania": "Dar es Salaam",
 			}
-			createds := make([]KeyValueRecord, 0)
+			createds := make(map[string]KeyValueRecord)
 			for country, capital := range capitals {
 				created := KeyValueRecord{}
 				req := valueToCreateRecord(capital, 3600)
-				// Note: with multi-node checks, captures the last-processed node's response
 				do.PutJSON(Node("n1"), fmt.Sprintf("/kv/%s:capital", country), req).
 					Status(Is(200)).
 					Hint("Your server should accept PUT requests.\n" +
@@ -116,7 +115,7 @@ func HTTPAPI() *Suite {
 						"Ensure your HTTP handler processes PUT requests to /kv/{key}.").
 					Capture(&created).
 					Run()
-				createds = append(createds, created)
+				createds[country] = created
 			}
 
 			dodoma_req1 := valueToCreateRecord("Dodoma", 3600)
@@ -125,7 +124,7 @@ func HTTPAPI() *Suite {
 				Hint("Svr must reject invalid updates. Make sure to verify UUID Version").
 				Run()
 
-			dodoma_req2 := valueToUpdateRecord("Dodoma", createds[2].Version, 3600)
+			dodoma_req2 := valueToUpdateRecord("Dodoma", createds["tanzania"].Version, 3600)
 			updated := KeyValueRecord{}
 			do.PutJSON(Node("n1"), "/kv/tanzania:capital", dodoma_req2).
 				Status(Is(200)).
