@@ -77,6 +77,8 @@ func HTTPAPI() *Suite {
 	).
 		// 0
 		Test("Cleanup", func(do *Do) {
+			// In case docker containers are still up from previous runs,
+			// we want to clear the store before starting the tests.
 			tableInfo := KeyValueRecord{}
 			do.GET(Node("n1"), "/table").
 				Status(Is(200)).
@@ -443,6 +445,9 @@ func HTTPAPI() *Suite {
 					"Ensure thread-safety in your storage implementation.").
 				Run()
 
+			// The following test will attempt to concurrently update the same key
+			// with different values. Only one of these updates should succeed, and
+			// the others should fail with a 409 Conflict.
 			statuses := make([]int, 101)
 			do.Concurrently(100, func(i int) {
 				raceKeyUpdate := valueToUpdateRecord(fmt.Sprintf("value%d", i+1), raceKeyInfo.Version, 3600)
