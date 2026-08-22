@@ -259,7 +259,7 @@ func HTTPAPI() *Suite {
 		}).
 
 		// 5
-		Test("DELETE Idempotently Removes Keys", func(do *Do) {
+		Test("DELETE Removes Keys Once", func(do *Do) {
 			do.DELETE(Node("n1"), "/kv/tanzania:capital").
 				Status(Is(415)).
 				Hint("Your server should not permit DELETE requests without version.").
@@ -291,6 +291,11 @@ func HTTPAPI() *Suite {
 				Hint("Delete without JSON is unsupported media type").
 				Run()
 
+			do.DeleteJSON(Node("n1"), "/kv/nonexistent:key", versionToDeleteRecord(updated_tanzania.Version)).
+				Status(Is(409)).
+				Hint("Even with JSON with non-zero UUID, deletion on non-existent key is prohibited").
+				Run()
+
 			twice_record := KeyValueRecord{}
 			twice_create_req := valueToCreateRecord("value", 3600)
 			do.PutJSON(Node("n1"), "/kv/delete:twice", twice_create_req).
@@ -310,9 +315,9 @@ func HTTPAPI() *Suite {
 				Run()
 
 			do.DeleteJSON(Node("n1"), "/kv/delete:twice", versionToDeleteRecord(twice_delete_resp.Version)).
-				Status(Is(200)).
-				Hint("Your server should handle repeated deletions, 2nd time with version from last time, gracefully.\n" +
-					"Deleting the same key twice should be idempotent (return 200 OK).").
+				Status(Is(400)).
+				Hint("Repeated deletions should be banned since key no longer exists.\n" +
+					"Deleting the same key twice on valid UUID should give 400.").
 				Run()
 
 			twice_create_req = valueToCreateRecord("reinserted", 3600)
