@@ -18,8 +18,6 @@ Please note that at the moment, only http_api tests have been modified for use o
 
 ## RamCourt Known Limitations
 
-- RamCourt supports duration_secs as input and expiration_secs on the key-value entry itself, but does not yet clean the entry when the expiration point of time is reached. When it does, you can expect tests related to duration and expiration.
-
 - RamCourt does not yet support multiple tables. There is for now only one global table covering all keys and values. Once table-name is introduced, there will likely become a table/{table-name} endpoint, and interactions for that table are expected to go there.
 
 - RamCourt does not yet support backup propagation between nodes in a cluster, or features corresponding to remaining tests, but that will be adjusted once that feature is added.

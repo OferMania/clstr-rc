@@ -3,12 +3,19 @@ package kvstore
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	. "github.com/OferMania/clstr-rc/internal/attest"
 )
 
 func Equal[T comparable](got, want T, hint string) {
 	if got != want {
+		panic(fmt.Sprintf("Expected %v, got %v\n\n  %s", want, got, hint))
+	}
+}
+
+func NotEqual[T comparable](got, want T, hint string) {
+	if got == want {
 		panic(fmt.Sprintf("Expected %v, got %v\n\n  %s", want, got, hint))
 	}
 }
@@ -513,5 +520,98 @@ func HTTPAPI() *Suite {
 						"Only GET or DELETE /table should be allowed. Return 405 Method Not Allowed for other methods.").
 					Run()
 			}
+		}).
+
+		// 11
+		Test("Expired Keys Are Removed", func(do *Do) {
+			req1 := valueToCreateRecord("temp-value1", 2)    // 2-second expiration
+			req2 := valueToCreateRecord("temp-value2", 7200) // 2-hour expiration
+			req3 := valueToCreateRecord("temp-value3", 120)  // 2-minute expiration
+			req4 := valueToCreateRecord("temp-value4", 0)    // never expires
+			do.PutJSON(Node("n1"), "/kv/expiring:key1", req1).
+				Status(Is(200)).
+				Hint("Server should accept a short-lived key.").
+				Run()
+			do.PutJSON(Node("n1"), "/kv/expiring:key2", req2).
+				Status(Is(200)).
+				Hint("Server should accept a long-lived key.").
+				Run()
+			do.PutJSON(Node("n1"), "/kv/expiring:key3", req3).
+				Status(Is(200)).
+				Hint("Server should accept a medium-lived key.").
+				Run()
+			do.PutJSON(Node("n1"), "/kv/expiring:key4", req4).
+				Status(Is(200)).
+				Hint("Server should accept a never-expiring key.").
+				Run()
+
+			record1 := KeyValueRecord{}
+			do.GET(Node("n1"), "/kv/expiring:key1").
+				Status(Is(200)).
+				Capture(&record1).
+				Hint("Key should exist immediately after creation.").
+				Run()
+
+			Equal(record1.Value, "temp-value1", "Value for expiring:key1 should match the stored value.")
+			Equal(record1.DurationSecs, uint64(2), "DurationSecs for expiring:key1 should match the stored duration.")
+
+			do.GET(Node("n1"), "/kv/expiring:key1").
+				Eventually(5 * time.Second).
+				Status(Is(404)).
+				Hint("Server's background cleaner should remove the key within a few seconds of expiration.").
+				Run()
+			record2 := KeyValueRecord{}
+			do.GET(Node("n1"), "/kv/expiring:key2").
+				Status(Is(200)).
+				Capture(&record2).
+				Hint("Long-lived Key should exist well after creation.").
+				Run()
+			record3a := KeyValueRecord{}
+			do.GET(Node("n1"), "/kv/expiring:key3").
+				Status(Is(200)).
+				Capture(&record3a).
+				Hint("Medium-lived Key should exist well after creation.").
+				Run()
+			record4 := KeyValueRecord{}
+			do.GET(Node("n1"), "/kv/expiring:key4").
+				Status(Is(200)).
+				Capture(&record4).
+				Hint("Never-expiring Key should exist well after creation.").
+				Run()
+
+			Equal(record2.Value, "temp-value2", "Value for expiring:key2 should match the stored value.")
+			Equal(record2.DurationSecs, uint64(7200), "DurationSecs for expiring:key2 should match the stored duration.")
+
+			Equal(record3a.Value, "temp-value3", "Value for expiring:key3 should match the stored value.")
+			Equal(record3a.DurationSecs, uint64(120), "DurationSecs for expiring:key3 should match the stored duration.")
+
+			Equal(record4.Value, "temp-value4", "Value for expiring:key4 should match the stored value.")
+			Equal(record4.DurationSecs, uint64(0), "DurationSecs for expiring:key4 should match the stored duration.")
+
+			req3b := valueToUpdateRecord("temp-value3-updated", record3a.Version, 130)
+			do.PutJSON(Node("n1"), "/kv/expiring:key3", req3b).
+				Status(Is(200)).
+				Hint("Server should allow updating an expiring key.").
+				Run()
+			record3b := KeyValueRecord{}
+			do.GET(Node("n1"), "/kv/expiring:key3").
+				Status(Is(200)).
+				Capture(&record3b).
+				Hint("Updated Key should exist well after update.").
+				Run()
+
+			Equal(record3b.Value, "temp-value3-updated", "Value for expiring:key3 should match the updated value.")
+			Equal(record3b.DurationSecs, uint64(130), "DurationSecs for expiring:key3 should match the updated duration.")
+			NotEqual(record3a.Version, record3b.Version, "Version for expiring:key3 should change after update.")
+		}).
+
+		// 12
+		Test("Omitted Duration Gets Default TTL", func(do *Do) {
+			rec := KeyValueRecord{}
+			do.PutJSON(Node("n1"), "/kv/default:ttl", map[string]any{"value": "x"}).
+				Status(Is(200)).
+				Capture(&rec).
+				Run()
+			Equal(rec.DurationSecs, uint64(300), "Omitted duration_secs should get the default TTL.")
 		})
 }
