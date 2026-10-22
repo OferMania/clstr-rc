@@ -14,6 +14,8 @@ For RamCourt, http_api tests expects JSON responses for all requests, and JSON b
 
 The test to perform 100 simultaneous writes on a single key has been modified to verify that 99 requests fail & exactly one succeeds. RamCourt by design requires different clients to be on the correct "assumptions" about a key, including its version, in order to be able to update the value.
 
+Also, some behaviors differ deliberately from upstream clstr’s key-value tests. Deleting a key that doesn’t exist fails (409 if a version was supplied, 400 if not) instead of succeeding idempotently. Keys also expire (omitted duration_secs means a 300-second default, 0 means never). The http_api suite has tests for expiry, never-expiring keys, and the default TTL.
+
 Please note that at the moment, only http_api tests have been modified for use on RamCourt, but not any of the other clstr tests. The longterm goal is to modify other tests in similar manner to work with RamCourt's unique quirks.
 
 ## RamCourt Known Limitations
@@ -28,7 +30,7 @@ Please note that at the moment, only http_api tests have been modified for use o
 $ go install github.com/OferMania/clstr-rc/cmd/clstr@latest
 ```
 
-(Requires GOPRIVATE and git auth configured for this repo — see repo notes. Homebrew install isn't set up for this fork; build from source instead.)
+(Requires Go 1.26 or newer. Homebrew install isn't set up for this fork; build from source instead.)
 
 # `clstr` CLI
 
