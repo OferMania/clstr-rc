@@ -184,11 +184,18 @@ func HTTPAPI() *Suite {
 
 		// 2
 		Test("PUT Rejects Empty Keys and Values", func(do *Do) {
-			do.PutJSON(Node("n1"), "/kv/empty", valueToCreateRecord("", 3600)).
+			do.PutJSON(Node("n1"), "/kv/empty", map[string]any{"duration_secs": 3600}).
 				Status(Is(400)).
-				Body(Matches("value cannot be empty")).
+				Body(Matches("new key 'empty' requires a value on initialization")).
 				Hint("Your server should reject empty values.\n" +
 					"Add validation to return 400 Bad Request for empty values.").
+				Run()
+
+			got1 := KeyValueRecord{}
+			do.PutJSON(Node("n1"), "/kv/empty", valueToCreateRecord("", 3600)).
+				Status(Is(200)).
+				Capture(&got1).
+				Hint("Your server should permit existent but empty values.").
 				Run()
 
 			some_req := valueToCreateRecord("some_value", 3600)
@@ -198,6 +205,26 @@ func HTTPAPI() *Suite {
 				Hint("Your server should reject empty keys.\n" +
 					"Add validation to return 400 Bad Request for empty keys.").
 				Run()
+
+			// change value to nonempty
+			update_req1 := valueToUpdateRecord("nonempty", got1.Version, 3600)
+			got2 := KeyValueRecord{}
+			do.PutJSON(Node("n1"), "/kv/empty", update_req1).
+				Status(Is(200)).
+				Capture(&got2).
+				Hint("Your server should permit updating empty values.").
+				Run()
+			Equal(got2.Value, "nonempty", "Value needs to match nonempty.")
+
+			// change value back to empty
+			update_req2 := valueToUpdateRecord("", got2.Version, 3600)
+			got3 := KeyValueRecord{}
+			do.PutJSON(Node("n1"), "/kv/empty", update_req2).
+				Status(Is(200)).
+				Capture(&got3).
+				Hint("Your server should permit updating nonempty values.").
+				Run()
+			Equal(got3.Value, "", "Value needs to match empty.")
 		}).
 
 		// 3
@@ -613,5 +640,40 @@ func HTTPAPI() *Suite {
 				Capture(&rec).
 				Run()
 			Equal(rec.DurationSecs, uint64(300), "Omitted duration_secs should get the default TTL.")
+		}).
+
+		// 13
+		Test("Omitted Duration Reuses Prior TTL", func(do *Do) {
+			req := valueToCreateRecord("temp-value1", 600) // 10-minute expiration
+			rec1 := KeyValueRecord{}
+			do.PutJSON(Node("n1"), "/kv/specific:ttl", req).
+				Status(Is(200)).
+				Capture(&rec1).
+				Run()
+			rec2 := KeyValueRecord{}
+			do.PutJSON(Node("n1"), "/kv/specific:ttl", map[string]any{"value": "temp-value2", "version": rec1.Version}).
+				Status(Is(200)).
+				Capture(&rec2).
+				Run()
+			Equal(rec2.DurationSecs, uint64(600), "Omitted duration_secs should reuse the prior TTL.")
+			Equal(rec2.Value, "temp-value2", "Value for specific:ttl should match the updated value.")
+		}).
+		// 14
+		Test("Can Omit Value and TTL to Renew", func(do *Do) {
+			req := valueToCreateRecord("temp-value", 600) // 10-minute expiration
+			rec1 := KeyValueRecord{}
+			do.PutJSON(Node("n1"), "/kv/specific:ttl2", req).
+				Status(Is(200)).
+				Hint("ttl2 should be initialized nonempty.").
+				Capture(&rec1).
+				Run()
+			rec2 := KeyValueRecord{}
+			do.PutJSON(Node("n1"), "/kv/specific:ttl2", map[string]any{"version": rec1.Version}).
+				Status(Is(200)).
+				Hint("ttl2 should be reused.").
+				Capture(&rec2).
+				Run()
+			Equal(rec2.DurationSecs, uint64(600), "Omitted duration_secs should reuse the prior TTL.")
+			Equal(rec2.Value, "temp-value", "Value for specific:ttl2 should match the initial value.")
 		})
 }
