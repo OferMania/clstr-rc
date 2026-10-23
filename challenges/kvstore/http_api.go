@@ -613,5 +613,21 @@ func HTTPAPI() *Suite {
 				Capture(&rec).
 				Run()
 			Equal(rec.DurationSecs, uint64(300), "Omitted duration_secs should get the default TTL.")
+		}).
+
+		// 13
+		Test("Omitted Duration Reuses Prior TTL", func(do *Do) {
+			req := valueToCreateRecord("temp-value1", 600) // 10-minute expiration
+			rec := KeyValueRecord{}
+			do.PutJSON(Node("n1"), "/kv/specific:ttl", req).
+				Status(Is(200)).
+				Capture(&rec).
+				Run()
+			do.PutJSON(Node("n1"), "/kv/specific:ttl", map[string]any{"value": "temp-value2", "version": rec.Version}).
+				Status(Is(200)).
+				Capture(&rec).
+				Run()
+			Equal(rec.DurationSecs, uint64(600), "Omitted duration_secs should reuse the prior TTL.")
+			Equal(rec.Value, "temp-value2", "Value for specific:ttl should match the updated value.")
 		})
 }
