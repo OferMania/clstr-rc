@@ -48,6 +48,15 @@ type UpdateKeyValueRecord struct {
 	Version      string `json:"version"`
 }
 
+type TableRecord struct {
+	TableName    string `json:"table_name"`
+	TableVersion string `json:"table_version"`
+}
+
+type EnumerateTableRecord struct {
+	Tables []TableRecord `json:"tables"`
+}
+
 func valueToUpdateRecord(value string, version string, durationSecs uint64) UpdateKeyValueRecord {
 	return UpdateKeyValueRecord{
 		Value:        value,
@@ -86,22 +95,23 @@ func HTTPAPI() *Suite {
 		Test("Cleanup", func(do *Do) {
 			// In case docker containers are still up from previous runs,
 			// we want to clear the store before starting the tests.
-			tableInfo := KeyValueRecord{}
-			do.GET(Node("n1"), "/table").
+			tableInfo := EnumerateTableRecord{}
+			do.GET(Node("n1"), "/enumerate").
 				Status(Is(200)).
 				Capture(&tableInfo).
-				Hint("Your server permit getting on /table for table_version.").
+				Hint("Your server permit getting on /enumerate on all tables.").
 				Run()
 
-			tableReq := versionToTableVersionRecord(tableInfo.TableVersion)
-			tableInfo2 := KeyValueRecord{}
-			do.DeleteJSON(Node("n1"), "/table", tableReq).
-				Status(Is(200)).
-				Capture(&tableInfo2).
-				Hint("Your server should implement a /table endpoint with table_version,\n" +
-					"that deletes all key-value pairs.").
-				Run()
-
+			for _, table := range tableInfo.Tables {
+				tableReq := versionToTableVersionRecord(table.TableVersion)
+				tableInfo2 := KeyValueRecord{}
+				do.DeleteJSON(Node("n1"), fmt.Sprintf("/kv/%s", table.TableName), tableReq).
+					Status(Is(200)).
+					Capture(&tableInfo2).
+					Hint("Your server should implement a /kv/{table_name} endpoint with table_version,\n" +
+						"that deletes all key-value pairs in that table.").
+					Run()
+			}
 		}).
 
 		// 1
@@ -161,7 +171,7 @@ func HTTPAPI() *Suite {
 			longKey := "long:" + strings.Repeat("k", 100)
 			longValue := strings.Repeat("v", 10_000)
 			long_req1 := valueToCreateRecord(longValue, 3600)
-			do.PutJSON(Node("n1"), fmt.Sprintf("/kv/%s", longKey), long_req1).
+			do.PutJSON(Node("n1"), fmt.Sprintf("/kv/longkey:%s", longKey), long_req1).
 				Status(Is(200)).
 				Hint("Your server should handle long keys and values.\n" +
 					"Ensure your server doesn't have arbitrary key & value length limits.").
@@ -185,13 +195,18 @@ func HTTPAPI() *Suite {
 		// 2
 		Test("PUT Rejects Empty Keys and Values", func(do *Do) {
 			do.PutJSON(Node("n1"), "/kv/empty", map[string]any{"duration_secs": 3600}).
+				Status(Is(200)).
+				Hint("Your server should permit creating empty tables.").
+				Run()
+
+			do.PutJSON(Node("n1"), "/kv/empty:empty", map[string]any{"duration_secs": 3600}).
 				Status(Is(400)).
 				Body(Matches("new key 'empty' requires a value on initialization")).
 				Hint("Your server should reject omitted value field.\n" +
 					"Add validation to return 400 Bad Request for empty values.").
 				Run()
 
-			do.PutJSON(Node("n1"), "/kv/empty", valueToCreateRecord("", 3600)).
+			do.PutJSON(Node("n1"), "/kv/empty:empty", valueToCreateRecord("", 3600)).
 				Status(Is(400)).
 				Body(Matches("new key 'empty' requires a value on initialization")).
 				Hint("Your server should reject empty values.\n" +
@@ -208,14 +223,14 @@ func HTTPAPI() *Suite {
 
 			// set value to nonempty, then update without a value
 			got1 := KeyValueRecord{}
-			do.PutJSON(Node("n1"), "/kv/empty", valueToCreateRecord("nonempty", 3600)).
+			do.PutJSON(Node("n1"), "/kv/empty:empty", valueToCreateRecord("nonempty", 3600)).
 				Status(Is(200)).
 				Capture(&got1).
 				Hint("Your server should accept nonempty values for the key.").
 				Run()
 			update_req1 := valueToUpdateRecord("", got1.Version, 3600)
 			got2 := KeyValueRecord{}
-			do.PutJSON(Node("n1"), "/kv/empty", update_req1).
+			do.PutJSON(Node("n1"), "/kv/empty:empty", update_req1).
 				Status(Is(200)).
 				Capture(&got2).
 				Hint("Your server should permit updating with empty values.").
@@ -256,7 +271,7 @@ func HTTPAPI() *Suite {
 
 			longKey := "long:" + strings.Repeat("k", 100)
 			longValue := strings.Repeat("v", 10_000)
-			do.GET(Node("n1"), fmt.Sprintf("/kv/%s", longKey)).
+			do.GET(Node("n1"), fmt.Sprintf("/kv/longkey:%s", longKey)).
 				Status(Is(200)).
 				JSON("value", Is(longValue)).
 				Hint("Your server should handle retrieval of long keys and values.\n" +
@@ -268,15 +283,15 @@ func HTTPAPI() *Suite {
 		Test("GET Rejects Missing and Invalid Keys", func(do *Do) {
 			do.GET(Node("n1"), "/kv/nonexistent:key").
 				Status(Is(404)).
-				Body(Matches("key not found")).
-				Hint("Your server should return 404 Not Found when a key doesn't exist.\n" +
+				Body(Matches("table not found")).
+				Hint("Your server should return 404 Not Found when a key or table doesn't exist.\n" +
 					"Check your key lookup logic and error handling.").
 				Run()
 
 			do.GET(Node("n1"), "/kv/KENYA:CAPITAL").
 				Status(Is(404)).
-				Body(Matches("key not found")).
-				Hint("Your server should return 404 Not Found when a key doesn't exist.\n" +
+				Body(Matches("table not found")).
+				Hint("Your server should return 404 Not Found when a key or table doesn't exist.\n" +
 					"Check your key lookup logic and error handling.").
 				Run()
 
@@ -322,7 +337,7 @@ func HTTPAPI() *Suite {
 				Run()
 
 			do.DeleteJSON(Node("n1"), "/kv/nonexistent:key", versionToDeleteRecord(updated_tanzania.Version)).
-				Status(Is(409)).
+				Status(Is(404)).
 				Hint("Even with JSON with non-zero UUID, deletion on non-existent key is prohibited").
 				Run()
 
@@ -399,13 +414,13 @@ func HTTPAPI() *Suite {
 					Run()
 			}
 
-			do.DELETE(Node("n1"), "/table").
+			do.DELETE(Node("n1"), "/kv/clear").
 				Status(Is(415)).
 				Hint("Your server prohibits /table without table_version.").
 				Run()
 
 			tableInfo := KeyValueRecord{}
-			do.GET(Node("n1"), "/table").
+			do.GET(Node("n1"), "/kv/clear").
 				Status(Is(200)).
 				Capture(&tableInfo).
 				Hint("Your server permit getting on /table for table_version.").
@@ -413,7 +428,7 @@ func HTTPAPI() *Suite {
 
 			tableReq := versionToTableVersionRecord(tableInfo.TableVersion)
 			tableInfo2 := KeyValueRecord{}
-			do.DeleteJSON(Node("n1"), "/table", tableReq).
+			do.DeleteJSON(Node("n1"), "/kv/clear", tableReq).
 				Status(Is(200)).
 				Capture(&tableInfo2).
 				Hint("Your server should implement a /table endpoint with table_version,\n" +
@@ -423,26 +438,30 @@ func HTTPAPI() *Suite {
 			for key := range testKeys {
 				do.GET(Node("n1"), fmt.Sprintf("/kv/%s", key)).
 					Status(Is(404)).
-					Body(Matches("key not found")).
+					Body(Matches("table not found")).
 					Hint("Your server should delete all keys when /table is called.\n" +
 						"Ensure the /table endpoint removes all stored key-value pairs.").
 					Run()
 			}
 
 			do.GET(Node("n1"), "/kv/kenya:capital").
-				Status(Is(404)).
-				Body(Matches("key not found")).
-				Hint("Your server should delete ALL keys when /table is called.\n" +
-					"Ensure the /table endpoint removes every key-value pair, not just recent ones.").
+				Status(Is(200)).
+				Hint("Deleting a clear table should not delete keys from kenya table.").
 				Run()
 
-			do.DELETE(Node("n1"), "/table").
+			do.DELETE(Node("n1"), "/kv/kenya").
 				Status(Is(415)).
-				Hint("Your server prohibits /table without table_version.").
+				Hint("Your server prohibits kenya table without table_version.").
 				Run()
 
-			tableReq2 := versionToTableVersionRecord(tableInfo2.TableVersion)
-			do.DeleteJSON(Node("n1"), "/table", tableReq2).
+			tableInfo3 := KeyValueRecord{}
+			do.GET(Node("n1"), "/kv/kenya").
+				Status(Is(200)).
+				Capture(&tableInfo3).
+				Hint("Your server permit getting on table kenya for table_version.").
+				Run()
+			tableReq3 := versionToTableVersionRecord(tableInfo3.TableVersion)
+			do.DeleteJSON(Node("n1"), "/kv/kenya", tableReq3).
 				Status(Is(200)).
 				Hint("Your server should handle clearing an empty store gracefully.\n" +
 					"Calling /table on an empty store with correct table_version should return 200 OK.").
@@ -521,6 +540,7 @@ func HTTPAPI() *Suite {
 		// 10
 		Test("Unsupported HTTP Methods Return 405", func(do *Do) {
 			for _, check := range []*Check{
+				do.PATCH(Node("n1"), "/kv/test"),
 				do.PATCH(Node("n1"), "/kv/test:key"),
 			} {
 				check.
@@ -528,19 +548,6 @@ func HTTPAPI() *Suite {
 					Body(Matches("method not allowed")).
 					Hint("Your server should reject unsupported HTTP methods on /kv/{key}.\n" +
 						"Add logic to return 405 Method Not Allowed for unsupported methods.").
-					Run()
-			}
-
-			for _, check := range []*Check{
-				do.POST(Node("n1"), "/table"),
-				do.PUT(Node("n1"), "/table"),
-				do.PATCH(Node("n1"), "/table"),
-			} {
-				check.
-					Status(Is(405)).
-					Body(Matches("method not allowed")).
-					Hint("Your server should reject unsupported HTTP methods on /table.\n" +
-						"Only GET or DELETE /table should be allowed. Return 405 Method Not Allowed for other methods.").
 					Run()
 			}
 		}).
