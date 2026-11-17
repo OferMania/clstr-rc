@@ -682,7 +682,7 @@ func HTTPAPI() *Suite {
 			Equal(rec2.Value, "temp-value2", "Value for specific:ttl2 should match the updated value.")
 			NotEqual(rec2.Version, rec1.Version, "Version for specific:ttl2 should change after update.")
 
-			time.Sleep(2 * time.Second) // expiration_secs changes each 1s
+			time.Sleep(5 * time.Second) // expiration_secs changes each 1s
 			do.PutJSON(Node("n1"), "/kv/specific:ttl2", map[string]any{"version": rec1.Version}).
 				Status(Is(409)).
 				Hint("ttl2 needs matching version to renew.").
